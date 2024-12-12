@@ -10,6 +10,106 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
+library(SoupX)
+library(Seurat)
+library(DropletUtils)
+library(BSgenome.Nfurzeri.NCBI.UINfuzMZM1.0.custom)
+library(BSgenome.Nfurzeri.NCBI.Nfu20140520.custom)
+library(Signac)
+library(tidyverse)
+library(dplyr)
+library(DoubletFinder)
+library(scDblFinder)
+```
 
+
+```{r}
+mat_path <- "../data/all-sample_rx1/DGE_filtered"
+
+mat <- ReadParseBio(mat_path)
+cell_meta <- read.csv(paste0(mat_path, "/cell_metadata.csv"), row.names = 1)
+
+cell_meta <- cell_meta %>%
+  mutate(sample = ifelse(sample == "30C_dia6d_1", "30C_dev1d_1", sample))
+
+cell_meta <- cell_meta %>%
+  mutate(sample = ifelse(sample == "30C_dia6d_2", "30C_dev1d_2", sample))
+
+cell_meta <- cell_meta %>%
+  separate(col = sample, into = c("temp", "timepoint", "replicate"), sep = "_", remove = F)
+
+so <- CreateSeuratObject(mat, names.field = 0, meta.data = cell_meta)
 
 ```
+
+
+```{r}
+so[["percent.mt"]] <- PercentageFeatureSet(so, pattern = "^KEG92-")
+
+VlnPlot(so, pt.size = 0.10, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "percent.mt")
+FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+
+so <- subset(so, subset = nFeature_RNA < 8000 & nCount_RNA < 20000 & percent.mt < 15)
+```
+
+```{r}
+so <- NormalizeData(so)
+so <- FindVariableFeatures(so)
+so <- ScaleData(so)
+so <- RunPCA(so)
+
+DimPlot(so, reduction = "pca")
+ElbowPlot(so,ndims = 50)
+
+# so <- JackStraw(so, dims = 50, num.replicate = 100)
+# so <- ScoreJackStraw(so, dims = 1:50, do.plot = T)
+
+```
+
+
+```{r}
+so <- RunUMAP(so, dims = 1:30)
+so <- FindNeighbors(so, dims = 1:30)
+so <- FindClusters(so, algorithm = 4, cluster.name = "leiden")
+so <- FindClusters(so, cluster.name = "louvain")
+```
+
+
+```{r}
+DimPlot(so, reduction = "umap", group.by = "louvain")
+DimPlot(so, reduction = "umap", group.by = "leiden")
+
+
+DimPlot(so, group.by = "temp")
+DimPlot(so, group.by = "timepoint")
+
+warm_colors <- brewer.pal(9, "Oranges")[c(7, 7, 5, 5, 3, 3)]
+cool_colors <- brewer.pal(9, "Blues")[c(7, 7, 5, 5, 3, 3)]
+color_scheme <- c(warm_colors, cool_colors)
+DimPlot(so, group.by = "sample", cols = color_scheme)
+```
+
+
+```{r}
+metadata <- so@meta.data
+metadata <- metadata %>%
+  mutate(timepoint_comb = ifelse(timepoint %in% c("dev1d", "dia6d"), "posthb", timepoint)) %>%
+  mutate(timepoint_comb = factor(timepoint_comb, levels = c("posthb", "hb", "predia")))
+so@meta.data <- metadata
+
+DimPlot(so, group.by = "sample", split.by = "timepoint_comb", cols = c("#D94801", "#D94801", "#D94801", "#D94801", "#D94801", "#D94801",
+                                                                       "#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5"))
+```
+
+
+```{r}
+library(RColorBrewer)
+library(scales)
+
+warm_colors <- brewer.pal(9, "Oranges")[c(7, 7, 5, 5, 3, 3)]
+
+cool_colors <- brewer.pal(9, "Blues")[c(7, 7, 5, 5, 3, 3)]
+color_scheme <- c(warm_colors, cool_colors)
+```
+
