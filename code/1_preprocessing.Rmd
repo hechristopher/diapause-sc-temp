@@ -8,6 +8,7 @@ date: "2024-12-11"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Import libraries, helper functions, and filepaths
 
 ```{r}
 library(SoupX)
@@ -20,53 +21,171 @@ library(tidyverse)
 library(dplyr)
 library(DoubletFinder)
 library(scDblFinder)
+library(RColorBrewer)
+library(scales)
 ```
 
+```{r}
+SaveFigure <- function(plots, name, type = "png", width, height, res){
+  if(type == "png") {
+    png(paste0(fig_path, name, ".", type),
+      width = width, height = height, units = "in", res = 200)
+  } else {
+    pdf(paste0(fig_path, name, ".", type),
+      width = width, height = height)
+  }
+  print(plots)
+  dev.off()
+  print(plots)
+}
+
+SaveObject <- function(object, name){
+  saveRDS(object, paste0(out_path, name, ".RDS"))
+}
+
+ReadObject <- function(name){
+  readRDS(paste0(out_path, name, ".RDS"))
+}
+```
 
 ```{r}
-mat_path <- "../data/all-sample_rx1/DGE_filtered"
+#path to spipe output matrix
+mat_path <- "../data/all-sample/DGE_filtered/"
+#path for saving analysis outputs
+out_path <- "../results/"
+#path for saving figures
+fig_path <- "../results/figures/"
 
+```
+
+## Import matrix
+
+Using the seurat function ReadParseBio, we can load in out cell x gene matrix that we got from spipe. We also can load the metadata and then create a seurat object.
+
+```{r}
 mat <- ReadParseBio(mat_path)
 cell_meta <- read.csv(paste0(mat_path, "/cell_metadata.csv"), row.names = 1)
 
-cell_meta <- cell_meta %>%
-  mutate(sample = ifelse(sample == "30C_dia6d_1", "30C_dev1d_1", sample))
-
-cell_meta <- cell_meta %>%
-  mutate(sample = ifelse(sample == "30C_dia6d_2", "30C_dev1d_2", sample))
-
+#split sample column into temperature, timepoint, and replicate columns
 cell_meta <- cell_meta %>%
   separate(col = sample, into = c("temp", "timepoint", "replicate"), sep = "_", remove = F)
 
 so <- CreateSeuratObject(mat, names.field = 0, meta.data = cell_meta)
 
+so
 ```
-
 
 ```{r}
+SaveObject(so, "so_unfiltered")
+so <- ReadObject("so_unfiltered")
+```
+
+## Identify Doublets with scDblFinder
+
+First, we convert our seurat object to a SingleCellExperiment, which is the format used by scDblFinder
+
+```{r}
+#convert seurat object to single cell experiment
+sce <- as.SingleCellExperiment(so)
+```
+
+Next, we can run scDblFinder, which will automatically use one metadata column to separate samples by, as doublet identification must be done independently one each sample. In this case, we will use the column "sample".
+
+```{r}
+#Run scDblFinder
+sce <- scDblFinder(sce, samples = "sample")
+
+#View results 
+table(sce$scDblFinder.class)
+
+#append to seurat object metadata
+doublets <- data.frame(sce@colData)
+doublets <- doublets[,(ncol(doublets)-4):ncol(doublets)] #keep columns containing scDblFinder results
+
+so@meta.data <- cbind(so@meta.data, doublets)
+```
+
+```{r}
+SaveObject(so, "so_post_doubletID")
+so <- ReadObject("so_post_doubletID")
+```
+
+## QC and Filtering
+
+We will first plot a few different QC metrics to visualize the quality of cells.
+
+Specifically, we are interested in expression of mitochondrial genes, number of genes per cell (nFeature_RNA), and number of counts per cell (nCount_RNA).
+
+We first generate a violin plot showing the distribution of these three metrics. Next, we look at the relationship between number of counts per cell and mitochondrial gene expression and number of genes per cell respectively in scatter plots.
+
+```{r}
+#calculate percentage expression of mitochondrial genes, which in the grz genome begin with KEG92
 so[["percent.mt"]] <- PercentageFeatureSet(so, pattern = "^KEG92-")
 
-VlnPlot(so, pt.size = 0.10, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
-FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "percent.mt")
-FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+#generate qc plots
+p <- VlnPlot(so, pt.size = 0.10, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+SaveFigure(p, "vln_QC", width = 6, height = 6)
 
-so <- subset(so, subset = nFeature_RNA < 8000 & nCount_RNA < 20000 & percent.mt < 15)
+p1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "percent.mt")
+p2 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+SaveFigure((p1+p2), "scatter_QC", width = 12, height = 6)
+
 ```
+
+Now, we can pick appropriate cutoffs for each of our qc metrics. Note: we have not removed doublets at this step
+
+```{r}
+so <- subset(so, subset = nFeature_RNA < 8000 & nCount_RNA < 20000 & percent.mt < 15)
+so
+```
+
+```{r}
+SaveObject(so, "so_filtered")
+so <- ReadObject("so_filtered")
+```
+
+Next, we run through the standard seurat workflow so we can visualize doublets on a UMAP plot.
 
 ```{r}
 so <- NormalizeData(so)
 so <- FindVariableFeatures(so)
 so <- ScaleData(so)
 so <- RunPCA(so)
-
 DimPlot(so, reduction = "pca")
-ElbowPlot(so,ndims = 50)
+so <- RunUMAP(so, dims = 1:30)
+```
 
-# so <- JackStraw(so, dims = 50, num.replicate = 100)
-# so <- ScoreJackStraw(so, dims = 1:50, do.plot = T)
+```{r}
+p <- DimPlot(so, reduction = "umap", group.by = "scDblFinder.class", cols = c("grey", "blue"))
+SaveFigure(p, "umap_doublets", width = 6, height = 6)
 
 ```
 
+Finally, we remove the doublets and save the object.
+
+```{r}
+so <- subset(so, scDblFinder.class == "singlet")
+so
+```
+
+```{r}
+SaveObject(so, "so_singlets")
+so <- ReadObject("so_singlets")
+```
+
+## Seurat Processing
+
+Now, we can re-run the seurat workflow and visualize our data using UMAP plots
+
+```{r}
+so <- NormalizeData(so)
+so <- FindVariableFeatures(so)
+so <- ScaleData(so)
+so <- RunPCA(so)
+ElbowPlot(so,ndims = 50)
+so <- JackStraw(so, dims = 50, num.replicate = 100)
+so <- ScoreJackStraw(so, dims = 1:50, do.plot = T)
+```
 
 ```{r}
 so <- RunUMAP(so, dims = 1:30)
@@ -74,7 +193,6 @@ so <- FindNeighbors(so, dims = 1:30)
 so <- FindClusters(so, algorithm = 4, cluster.name = "leiden")
 so <- FindClusters(so, cluster.name = "louvain")
 ```
-
 
 ```{r}
 DimPlot(so, reduction = "umap", group.by = "louvain")
@@ -90,7 +208,6 @@ color_scheme <- c(warm_colors, cool_colors)
 DimPlot(so, group.by = "sample", cols = color_scheme)
 ```
 
-
 ```{r}
 metadata <- so@meta.data
 metadata <- metadata %>%
@@ -101,15 +218,3 @@ so@meta.data <- metadata
 DimPlot(so, group.by = "sample", split.by = "timepoint_comb", cols = c("#D94801", "#D94801", "#D94801", "#D94801", "#D94801", "#D94801",
                                                                        "#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5"))
 ```
-
-
-```{r}
-library(RColorBrewer)
-library(scales)
-
-warm_colors <- brewer.pal(9, "Oranges")[c(7, 7, 5, 5, 3, 3)]
-
-cool_colors <- brewer.pal(9, "Blues")[c(7, 7, 5, 5, 3, 3)]
-color_scheme <- c(warm_colors, cool_colors)
-```
-
