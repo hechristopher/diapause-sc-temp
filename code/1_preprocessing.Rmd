@@ -14,7 +14,6 @@ knitr::opts_chunk$set(echo = TRUE)
 library(SoupX)
 library(Seurat)
 library(DropletUtils)
-library(BSgenome.Nfurzeri.NCBI.UINfuzMZM1.0.custom)
 library(BSgenome.Nfurzeri.NCBI.Nfu20140520.custom)
 library(Signac)
 library(tidyverse)
@@ -183,38 +182,48 @@ so <- FindVariableFeatures(so)
 so <- ScaleData(so)
 so <- RunPCA(so)
 ElbowPlot(so,ndims = 50)
-so <- JackStraw(so, dims = 50, num.replicate = 100)
-so <- ScoreJackStraw(so, dims = 1:50, do.plot = T)
+# so <- JackStraw(so, dims = 50, num.replicate = 100)
+# so <- ScoreJackStraw(so, dims = 1:50, do.plot = T)
 ```
 
 ```{r}
 so <- RunUMAP(so, dims = 1:30)
 so <- FindNeighbors(so, dims = 1:30)
-so <- FindClusters(so, algorithm = 4, cluster.name = "leiden")
 so <- FindClusters(so, cluster.name = "louvain")
 ```
 
 ```{r}
-DimPlot(so, reduction = "umap", group.by = "louvain")
-DimPlot(so, reduction = "umap", group.by = "leiden")
+p1 <- DimPlot(so, group.by = "louvain", label = T, pt.size = 1) + NoLegend()
+SaveFigure(p1, "umap_clusters", width = 10, height = 10)
 
 
-DimPlot(so, group.by = "temp")
-DimPlot(so, group.by = "timepoint")
+p2 <- DimPlot(so, group.by = "temp", cols = c("#2171B5", "#D94801"), pt.size = 1)
+SaveFigure(p2, "umap_temp", width = 11, height = 10)
 
 warm_colors <- brewer.pal(9, "Oranges")[c(7, 7, 5, 5, 3, 3)]
 cool_colors <- brewer.pal(9, "Blues")[c(7, 7, 5, 5, 3, 3)]
-color_scheme <- c(warm_colors, cool_colors)
-DimPlot(so, group.by = "sample", cols = color_scheme)
+color_scheme <- c(cool_colors, warm_colors)
+p3 <- DimPlot(so, group.by = "sample", cols = color_scheme, pt.size = 1)
+SaveFigure(p3, "umap_sample", width = 11, height = 10)
+
 ```
 
 ```{r}
+#add combined timepoint to metadata
 metadata <- so@meta.data
 metadata <- metadata %>%
   mutate(timepoint_comb = ifelse(timepoint %in% c("dev1d", "dia6d"), "posthb", timepoint)) %>%
   mutate(timepoint_comb = factor(timepoint_comb, levels = c("posthb", "hb", "predia")))
 so@meta.data <- metadata
 
-DimPlot(so, group.by = "sample", split.by = "timepoint_comb", cols = c("#D94801", "#D94801", "#D94801", "#D94801", "#D94801", "#D94801",
-                                                                       "#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5"))
+p <- DimPlot(so, group.by = "sample", split.by = "timepoint_comb", pt.size = 1,
+        cols = c("#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5", "#2171B5",
+                 "#D94801", "#D94801", "#D94801", "#D94801", "#D94801", "#D94801"))
+
+SaveFigure(p, "umap_timepoint_split", width = 20, height = 10)
+```
+
+```{r}
+SaveObject(so, "so_processed")
+so <- ReadObject("so_processed")
 ```

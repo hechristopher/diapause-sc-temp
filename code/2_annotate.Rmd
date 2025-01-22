@@ -1,0 +1,194 @@
+---
+title: "2_annotate"
+output: html_document
+date: "2024-12-11"
+---
+
+## Import libraries, helper functions, and filepaths
+
+```{r}
+library(SoupX)
+library(Seurat)
+library(DropletUtils)
+library(BSgenome.Nfurzeri.NCBI.Nfu20140520.custom)
+library(Signac)
+library(tidyverse)
+library(dplyr)
+library(DoubletFinder)
+library(scDblFinder)
+library(RColorBrewer)
+library(scales)
+library(readxl)
+```
+
+```{r}
+SaveFigure <- function(plots, name, type = "png", width, height, res){
+  if(type == "png") {
+    png(paste0(fig_path, name, ".", type),
+      width = width, height = height, units = "in", res = 200)
+  } else {
+    pdf(paste0(fig_path, name, ".", type),
+      width = width, height = height)
+  }
+  print(plots)
+  dev.off()
+  print(plots)
+}
+
+SaveObject <- function(object, name){
+  saveRDS(object, paste0(out_path, name, ".RDS"))
+}
+
+ReadObject <- function(name){
+  readRDS(paste0(out_path, name, ".RDS"))
+}
+
+#translate from NCBI annotation to our annotation/an ortholog
+translate <- function(genes, from = "N. furzeri (NCBI)", to = "N. furzeri Final Symbol") {
+  orthos <- read_excel("C:\\Users\\Christopher He\\OneDrive\\UCSF\\Singh Lab\\gene_ortholog_translation_data.xlsx")
+  
+  orthos <- orthos[!duplicated(orthos[[from]]),]
+  orthos <- orthos[!is.na(orthos[[from]]),]
+  
+  row.names(orthos) <- orthos[[from]]
+  translated <- orthos[genes,]
+  translated$genes <- genes
+  translated <- translated %>% mutate({{ to }} := coalesce(.data[[to]], genes))
+  return(translated[[to]])
+}
+```
+
+```{r}
+#path for saving analysis outputs
+out_path <- "../results/"
+#path for saving figures
+fig_path <- "../results/figures/"
+```
+
+## Import processed seurat object
+
+```{r}
+so <- ReadObject("so_processed")
+```
+
+```{r}
+all_markers <- FindAllMarkers(so)
+```
+```{r}
+all_markers$gene_name <- translate(all_markers$gene)
+all_markers$gene_name <- paste0(all_markers$gene, " (", all_markers$gene_name, ")")
+
+write.csv(all_markers,
+          paste0(out_path, "all_markers.csv"))
+
+```
+
+```{r}
+top_markers <- all_markers %>%
+  filter(avg_log2FC > 0.5) %>%
+  group_by(cluster) %>%
+  arrange(p_val_adj) %>%
+  slice_head(n = 20) %>%
+  mutate(rank = row_number()) %>%
+  select(cluster, rank, gene_name) %>%
+  pivot_wider(names_from = cluster, values_from = gene_name, names_prefix = "Cluster_", values_fill = list(gene_name = "")) %>%
+  arrange(rank) %>%
+  select(-rank)
+
+write.csv(top_markers,
+          paste0(out_path, "top_markers.csv"))
+
+
+```
+
+```{r}
+DimPlot(so, group.by = "seurat_clusters", label = T) + NoLegend()
+Idents(so) <- "seurat_clusters"
+```
+
+```{r}
+cluster_ids <- c(
+  'neuron_progenitor_23C',
+  'neuron_progenitor_30C',
+  'periderm',
+  'epidermal_30C',
+  'neuron',
+  'somite_1',
+  'head_kidney',
+  'telencephalon/optic_cup_23C',
+  'tail_bud',
+  'telencephalon/optic_cup_30C',
+  'head_mesenchyme?',
+  'mitotic_neuron',
+  'spinal_cord_30C',
+  'somite_2',
+  'spinal_cord_23C',
+  'midbrain_hindbrain_boundary_30C',
+  'blood_vasculature',
+  'hatching_gland_30C',
+  'tail_bud_2',
+  'epidermal_23C',
+  'hatching_gland_23C',
+  'primitive_gut',
+  'midbrain_hindbrain_boundary_23C',
+  'otic_vesicle',
+  'floor_plate',
+  'myotome/muscle',
+  'blood',
+  'pronephros',
+  'primitive_heart',
+  'neural_crest?',
+  'neuron_dscam',
+  'immune_cell'
+)
+
+names(cluster_ids) <- levels(so)
+so_annotated <- RenameIdents(so, cluster_ids)
+
+
+p <- DimPlot(so_annotated, label = T, repel = T, pt.size = 1) + NoLegend()
+SaveFigure(p, name = "umap_annotated", height = 10, width = 10)
+
+```
+# Custom Colors
+```{r}
+colors = c(
+  'neuron_progenitor_23C' = '#4E79A7',
+  'neuron_progenitor_30C' = '#A0CBE8',
+  'spinal_cord_23C' = '#F28E2B',
+  'spinal_cord_30C' = '#FFBE7D',
+  'midbrain_hindbrain_boundary_23C' = '#59A14F',
+  'midbrain_hindbrain_boundary_30C' = '#8CD17D',
+  'telencephalon/optic_cup_23C' = '#B6992D',
+  'telencephalon/optic_cup_30C' = '#F1CE63',
+  'floor_plate' = '#664CFF',
+  'mitotic_neuron' = '#C77EE6',
+  'neuron' = '#B15928',
+  'neuron_dscam' = '#0084D1',
+  'head_mesenchyme?' = '#BA43B4',
+  'somite_2' = '#BD0A36',
+  'somite_1' = '#F4737A',
+  'myotome/muscle' = '#5050FF',
+  'head_kidney' = '#0099C6',
+  'primitive_heart' = '#749B58',
+  'pronephros' = '#F0E685',
+  'tail_bud' = '#466983',
+  'tail_bud_2' = '#83CAFF',
+  'epidermal_23C' = '#007A99',
+  'epidermal_30C' = '#00AACC',
+  'periderm' = '#9D983D',
+  'neural_crest?' = '#E15759',
+  'primitive_gut' = '#AA8780',
+  'otic_vesicle' = '#33FF00',
+  'blood_vasculature' = '#FFD320',
+  'blood' = '#FF420E',
+  'hatching_gland_30C' = '#E377C2',
+  'hatching_gland_23C' = '#F7B6D2',
+  'immune_cell' = '#14FFB1'
+)
+
+p <- DimPlot(so_annotated, label = T, repel = T, pt.size = 1, cols = colors) + NoLegend()
+SaveFigure(p, name = "umap_annotated", height = 10, width = 10)
+
+```
+
