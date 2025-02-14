@@ -7,18 +7,19 @@ date: "2024-12-11"
 ## Import libraries, helper functions, and filepaths
 
 ```{r}
-library(SoupX)
-library(Seurat)
-library(DropletUtils)
-library(BSgenome.Nfurzeri.NCBI.Nfu20140520.custom)
-library(Signac)
-library(tidyverse)
-library(dplyr)
-library(DoubletFinder)
-library(scDblFinder)
-library(RColorBrewer)
-library(scales)
-library(readxl)
+suppressPackageStartupMessages({
+  library(SoupX)
+  library(Seurat)
+  library(DropletUtils)
+  library(BSgenome.Nfurzeri.NCBI.Nfu20140520.custom)
+  library(tidyverse)
+  library(dplyr)
+  library(DoubletFinder)
+  library(scDblFinder)
+  library(RColorBrewer)
+  library(scales)
+  library(readxl)
+})
 ```
 
 ```{r}
@@ -36,11 +37,11 @@ SaveFigure <- function(plots, name, type = "png", width, height, res){
 }
 
 SaveObject <- function(object, name){
-  saveRDS(object, paste0(out_path, name, ".RDS"))
+  saveRDS(object, paste0(out_path, name, ".rds"))
 }
 
 ReadObject <- function(name){
-  readRDS(paste0(out_path, name, ".RDS"))
+  readRDS(paste0(out_path, name, ".rds"))
 }
 
 #translate from NCBI annotation to our annotation/an ortholog
@@ -191,4 +192,10 @@ p <- DimPlot(so_annotated, label = T, repel = T, pt.size = 1, cols = colors) + N
 SaveFigure(p, name = "umap_annotated", height = 10, width = 10)
 
 ```
+```{r}
+SaveObject(so_annotated, "so_annotated")
+so_annotated <- ReadObject("so_annotated")
+
+```
+
 

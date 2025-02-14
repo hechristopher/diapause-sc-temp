@@ -39,11 +39,11 @@ SaveFigure <- function(plots, name, type = "png", width, height, res){
 }
 
 SaveObject <- function(object, name){
-  saveRDS(object, paste0(out_path, name, ".RDS"))
+  saveRDS(object, paste0(out_path, name, ".rds"))
 }
 
 ReadObject <- function(name){
-  readRDS(paste0(out_path, name, ".RDS"))
+  readRDS(paste0(out_path, name, ".rds"))
 }
 ```
 

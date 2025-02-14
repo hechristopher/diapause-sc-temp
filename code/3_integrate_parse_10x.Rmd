@@ -1,0 +1,89 @@
+---
+title: "3_integrate_parse_10x"
+output: html_document
+date: "2024-12-11"
+---
+
+## Import libraries, helper functions, and filepaths
+
+```{r}
+suppressPackageStartupMessages({
+  library(SoupX)
+  library(Seurat)
+  library(DropletUtils)
+  library(BSgenome.Nfurzeri.NCBI.Nfu20140520.custom)
+  library(tidyverse)
+  library(dplyr)
+  library(DoubletFinder)
+  library(scDblFinder)
+  library(RColorBrewer)
+  library(scales)
+  library(readxl)
+})
+```
+
+```{r}
+SaveFigure <- function(plots, name, type = "png", width, height, res){
+  if(type == "png") {
+    png(paste0(fig_path, name, ".", type),
+      width = width, height = height, units = "in", res = 200)
+  } else {
+    pdf(paste0(fig_path, name, ".", type),
+      width = width, height = height)
+  }
+  print(plots)
+  dev.off()
+  print(plots)
+}
+
+SaveObject <- function(object, name){
+  saveRDS(object, paste0(out_path, name, ".rds"))
+}
+
+ReadObject <- function(name){
+  readRDS(paste0(out_path, name, ".rds"))
+}
+
+#translate from NCBI annotation to our annotation/an ortholog
+translate <- function(genes, from = "N. furzeri (NCBI)", to = "N. furzeri Final Symbol") {
+  orthos <- read_excel("C:\\Users\\Christopher He\\OneDrive\\UCSF\\Singh Lab\\gene_ortholog_translation_data.xlsx")
+  
+  orthos <- orthos[!duplicated(orthos[[from]]),]
+  orthos <- orthos[!is.na(orthos[[from]]),]
+  
+  row.names(orthos) <- orthos[[from]]
+  translated <- orthos[genes,]
+  translated$genes <- genes
+  translated <- translated %>% mutate({{ to }} := coalesce(.data[[to]], genes))
+  return(translated[[to]])
+}
+```
+
+```{r}
+#path for saving analysis outputs
+out_path <- "../results/"
+#path for saving figures
+fig_path <- "../results/figures/"
+```
+
+
+## Load Parse object and Create 10x object
+```{r}
+so_annotated <- ReadObject("so_annotated")
+
+counts_10x <- Read10X_h5("../data/10x_batch1-3/filtered_feature_bc_matrix.h5")
+
+so_10x <- CreateSeuratObject(counts = counts_10x)
+
+```
+
+```{r}
+View(so_annotated@meta.data)
+View(so_10x@meta.data)
+
+#Create metadata columns for 10x
+sample_names <- c("25som_1", "hb_1", "hb_2", "dia1d_1", "dia2d_1", "dia6d_1", "dia6d_2", "dia1mo_1", "dia3mo_1", "dev1d_1", "dev1d_2", "dev1d_3")
+so_multi$sample <- sample_names[as.numeric(str_split_i(rownames(so_multi@meta.data), "-",2))]
+
+```
+

@@ -1,0 +1,26 @@
+---
+title: "scratch"
+---
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(BSgenome.Nfurzeri.NCBI.Nfu20140520.custom)
+  library(tidyverse)
+  library(RColorBrewer)
+  library(scales)
+  library(readxl)
+})
+```
+
+```{r}
+FeaturePlot(so_annotated, c("LOC107373896", "LOC107373895"))
+
+FeaturePlot(so_annotated, c("ppib"))
+
+so_annotated
+
+
+so_annotated@meta.data
+```
+
