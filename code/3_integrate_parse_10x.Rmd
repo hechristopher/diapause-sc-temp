@@ -69,21 +69,293 @@ fig_path <- "../results/figures/"
 
 ## Load Parse object and Create 10x object
 ```{r}
-so_annotated <- ReadObject("so_annotated")
+so_parse <- ReadObject("so_annotated")
 
 counts_10x <- Read10X_h5("../data/10x_batch1-3/filtered_feature_bc_matrix.h5")
-
 so_10x <- CreateSeuratObject(counts = counts_10x)
 
 ```
 
+add metadata columns
 ```{r}
-View(so_annotated@meta.data)
-View(so_10x@meta.data)
-
 #Create metadata columns for 10x
 sample_names <- c("25som_1", "hb_1", "hb_2", "dia1d_1", "dia2d_1", "dia6d_1", "dia6d_2", "dia1mo_1", "dia3mo_1", "dev1d_1", "dev1d_2", "dev1d_3")
-so_multi$sample <- sample_names[as.numeric(str_split_i(rownames(so_multi@meta.data), "-",2))]
+so_10x$sample <- sample_names[as.numeric(str_split_i(rownames(so_10x@meta.data), "-",2))]
 
+meta <-so_10x@meta.data
+meta <- meta %>% separate(col = sample, into = c("timepoint", "replicate"), sep = "_", remove = F)
+so_10x@meta.data <- meta
+```
+
+save unfiltered object
+```{r}
+SaveObject(so_10x, "so_10x_unfiltered")
+so_10x <- ReadObject("so_10x_unfiltered")
+```
+
+
+
+## Doublet ID
+```{r}
+sce_10x <- as.SingleCellExperiment(so_10x)
+```
+
+Next, we can run scDblFinder, which will automatically use one metadata column to separate samples by, as doublet identification must be done independently one each sample. In this case, we will use the column "sample".
+
+```{r}
+#Run scDblFinder
+sce_10x <- scDblFinder(sce_10x, samples = "sample")
+
+#View results 
+table(sce_10x$scDblFinder.class)
+
+#append to seurat object metadata
+doublets <- data.frame(sce_10x@colData)
+doublets <- doublets[,(ncol(doublets)-4):ncol(doublets)] #keep columns containing scDblFinder results
+
+so_10x@meta.data <- cbind(so_10x@meta.data, doublets)
+```
+
+```{r}
+SaveObject(so_10x, "so_10x_post_doubletID")
+so_10x <- ReadObject("so_10x_post_doubletID")
+```
+
+## QC and Filtering
+
+We will first plot a few different QC metrics to visualize the quality of cells.
+
+Specifically, we are interested in expression of mitochondrial genes, number of genes per cell (nFeature_RNA), and number of counts per cell (nCount_RNA).
+
+We first generate a violin plot showing the distribution of these three metrics. Next, we look at the relationship between number of counts per cell and mitochondrial gene expression and number of genes per cell respectively in scatter plots.
+
+```{r}
+#calculate percentage expression of mitochondrial genes, which in the grz genome begin with KEG92
+so_10x[["percent.mt"]] <- PercentageFeatureSet(so_10x, pattern = "^KEG92-")
+
+#generate qc plots
+p <- VlnPlot(so_10x, pt.size = 0.10, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+SaveFigure(p, "10x_vln_QC", width = 6, height = 6)
+
+p1 <- FeatureScatter(so_10x, feature1 = "nCount_RNA", feature2 = "percent.mt")
+p2 <- FeatureScatter(so_10x, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+SaveFigure((p1+p2), "10x_scatter_QC", width = 12, height = 6)
+
+```
+
+Now, we can pick appropriate cutoffs for each of our qc metrics. Note: we have not removed doublets at this step
+
+```{r}
+so_10x <- subset(so_10x, subset = nFeature_RNA < 5000 & nCount_RNA < 20000 & percent.mt < 15)
+so_10x
+```
+
+```{r}
+SaveObject(so_10x, "so_10x_filtered")
+so_10x <- ReadObject("so_10x_filtered")
+```
+
+Next, we run through the standard seurat workflow so we can visualize doublets on a UMAP plot.
+
+```{r}
+so_10x <- NormalizeData(so_10x)
+so_10x <- FindVariableFeatures(so_10x)
+so_10x <- ScaleData(so_10x)
+so_10x <- RunPCA(so_10x)
+DimPlot(so_10x, reduction = "pca")
+so_10x <- RunUMAP(so_10x, dims=1:30)
+```
+
+```{r}
+p <- DimPlot(so_10x, reduction = "umap", group.by = "scDblFinder.class", cols = c("grey", "blue"))
+SaveFigure(p, "10x_umap_doublets", width = 6, height = 6)
+
+```
+
+Finally, we remove the doublets and save the object.
+```{r}
+so_10x <- subset(so_10x, scDblFinder.class == "singlet")
+so_10x
+```
+
+```{r}
+SaveObject(so_10x, "so_singlets")
+so_10x <- ReadObject("so_singlets")
+```
+
+## Seurat Processing
+
+Now, we can re-run the seurat workflow and visualize our data using UMAP plots
+
+```{r}
+so_10x <- NormalizeData(so_10x)
+so_10x <- FindVariableFeatures(so_10x)
+so_10x <- ScaleData(so_10x)
+so_10x <- RunPCA(so_10x)
+ElbowPlot(so_10x,ndims = 50)
+# so <- JackStraw(so, dims = 50, num.replicate = 100)
+# so <- ScoreJackStraw(so, dims = 1:50, do.plot = T)
+```
+
+```{r}
+so_10x <- RunUMAP(so_10x, dims = 1:30)
+so_10x <- FindNeighbors(so_10x, dims = 1:30)
+so_10x <- FindClusters(so_10x, cluster.name = "louvain")
+```
+
+```{r}
+p1 <- DimPlot(so_10x, group.by = "louvain", label = T, pt.size = 1) + NoLegend()
+SaveFigure(p1, "10x_umap_clusters", width = 10, height = 10)
+
+
+cols <- c("25som" = "#E496EF",
+          "hb" = "#800080",
+          "dia1d" = "#C6DBEF",
+          "dia2d" = "#C6DBEF",
+          "dia6d" = "#6BAED6",
+          "dia1mo" = "#2171B5",
+          "dia3mo" = "#08306B",
+          "dev1d" = "#FD8D3C")
+p2 <- DimPlot(so_10x, group.by = "timepoint", cols = cols, pt.size = .5)
+SaveFigure(p2, "10x_umap_timepoint", width = 11, height = 10)
+```
+
+
+```{r}
+SaveObject(so_10x, "so_10x_processed")
+so_10x <- ReadObject("so_10x_processed")
+```
+
+#merge datasets
+```{r}
+so_merged <- merge(so_parse,
+                  so_10x,
+                  add.cell.ids = c("parse", "10x"),
+                  )
+
+so_merged$dataset <- str_split_i(rownames(so_merged@meta.data), "_",1)
+
+```
+
+```{r}
+so_merged <- NormalizeData(so_merged)
+so_merged <- FindVariableFeatures(so_merged)
+so_merged <- ScaleData(so_merged)
+so_merged <- RunPCA(so_merged)
+so_merged <- RunUMAP(so_merged, dims = 1:30)
+# so_merged <- FindNeighbors(so_merged, dims = 1:30)
+# so_merged <- FindClusters(so_merged, cluster.name = "louvain")
+```
+```{r}
+DimPlot(so_merged, group.by = "dataset")
+```
+
+
+pseudobulk PCA
+```{r}
+pseudo <- AggregateExpression(so_merged, return.seurat = T, group.by = "sample")
+
+pseudo <- NormalizeData(pseudo)
+pseudo <- FindVariableFeatures(pseudo)
+pseudo <- RunPCA(pseudo, npcs = 7)
+
+
+DimPlot(pseudo, reduction = "pca",
+             label = T, repel = T, pt.size = 4) + NoLegend()
+
+```
+Label Transfer
+```{r}
+# select two technologies for the query datasets
+anchors <- FindTransferAnchors(reference = so_parse, query = so_10x, dims = 1:30,
+    reference.reduction = "pca")
+predictions <- TransferData(anchorset = anchors, refdata = Idents(so_parse), dims = 1:30)
+so_10x <- AddMetaData(so_10x, metadata = predictions)
+```
+
+```{r}
+colors = c(
+  'neuron_progenitor_23C' = '#4E79A7',
+  'neuron_progenitor_30C' = '#A0CBE8',
+  'spinal_cord_23C' = '#F28E2B',
+  'spinal_cord_30C' = '#FFBE7D',
+  'midbrain_hindbrain_boundary_23C' = '#59A14F',
+  'midbrain_hindbrain_boundary_30C' = '#8CD17D',
+  'telencephalon/optic_cup_23C' = '#B6992D',
+  'telencephalon/optic_cup_30C' = '#F1CE63',
+  'floor_plate' = '#664CFF',
+  'mitotic_neuron' = '#C77EE6',
+  'neuron' = '#B15928',
+  'neuron_dscam' = '#0084D1',
+  'head_mesenchyme?' = '#BA43B4',
+  'somite_2' = '#BD0A36',
+  'somite_1' = '#F4737A',
+  'myotome/muscle' = '#5050FF',
+  'head_kidney' = '#0099C6',
+  'primitive_heart' = '#749B58',
+  'pronephros' = '#F0E685',
+  'tail_bud' = '#466983',
+  'tail_bud_2' = '#83CAFF',
+  'epidermal_23C' = '#007A99',
+  'epidermal_30C' = '#00AACC',
+  'periderm' = '#9D983D',
+  'neural_crest?' = '#E15759',
+  'primitive_gut' = '#AA8780',
+  'otic_vesicle' = '#33FF00',
+  'blood_vasculature' = '#FFD320',
+  'blood' = '#FF420E',
+  'hatching_gland_30C' = '#E377C2',
+  'hatching_gland_23C' = '#F7B6D2',
+  'immune_cell' = '#14FFB1'
+)
+
+DimPlot(so_10x, group.by = "predicted.id", cols = colors, label = T, repel = T)
+
+```
+Integration
+```{r}
+so_merged$dataset
+
+so_merged <- JoinLayers(so_merged)
+
+so_merged[["RNA"]] <- split(so_merged[["RNA"]], f = so_merged$dataset)
+
+
+so_merged <- NormalizeData(so_merged)
+so_merged <- FindVariableFeatures(so_merged)
+so_merged <- ScaleData(so_merged)
+so_merged <- RunPCA(so_merged)
+
+so_merged <- RunUMAP(so_merged, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")
+DimPlot(so_merged, reduction = "umap.unintegrated", label = T, repel = T) + NoLegend()
+DimPlot(so_merged, reduction = "umap.unintegrated", group.by = "dataset")
+
+so_merged <- IntegrateLayers(object = so_merged, method = RPCAIntegration, orig.reduction = "pca", new.reduction = "integrated.rpca")
+
+so_merged <- RunUMAP(so_merged, reduction = "integrated.rpca", dims = 1:30, reduction.name = "umap.rpca")
+DimPlot(so_merged, reduction = "umap.rpca", label = T, repel = T) + NoLegend()
+DimPlot(so_merged, reduction = "umap.rpca", group.by = "dataset")
+
+View(so_merged@meta.data)
+
+
+DimPlot(so_merged, reduction = "umap.rpca", group.by = "timepoint", split.by = "dataset")
+DimPlot(so_merged, reduction = "umap.rpca", group.by = "dataset", split.by = "timepoint")
+
+```
+#read in 10x annotations
+```{r}
+annotations_10x <- read.csv("../results/10x_annotations.csv", header = T, row.names = 1)
+annotations_10x
+
+
+annotations_10x[rownames(so_10x@meta.data),]
+
+so_10x@meta.data
+
+
+so_10x
+
+intersect(rownames(so_10x@meta.data), rownames(annotations_10x))
 ```
 

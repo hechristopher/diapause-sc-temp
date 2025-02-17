@@ -24,3 +24,57 @@ so_annotated
 so_annotated@meta.data
 ```
 
+```{r}
+rui_genes <- read.csv("../results/Parse_diapause candidate genes_list.csv")
+
+
+rui_genes
+
+colors = c(
+  'neuron_progenitor_23C' = '#4E79A7',
+  'neuron_progenitor_30C' = '#A0CBE8',
+  'spinal_cord_23C' = '#F28E2B',
+  'spinal_cord_30C' = '#FFBE7D',
+  'midbrain_hindbrain_boundary_23C' = '#59A14F',
+  'midbrain_hindbrain_boundary_30C' = '#8CD17D',
+  'telencephalon/optic_cup_23C' = '#B6992D',
+  'telencephalon/optic_cup_30C' = '#F1CE63',
+  'floor_plate' = '#664CFF',
+  'mitotic_neuron' = '#C77EE6',
+  'neuron' = '#B15928',
+  'neuron_dscam' = '#0084D1',
+  'head_mesenchyme?' = '#BA43B4',
+  'somite_2' = '#BD0A36',
+  'somite_1' = '#F4737A',
+  'myotome/muscle' = '#5050FF',
+  'head_kidney' = '#0099C6',
+  'primitive_heart' = '#749B58',
+  'pronephros' = '#F0E685',
+  'tail_bud' = '#466983',
+  'tail_bud_2' = '#83CAFF',
+  'epidermal_23C' = '#007A99',
+  'epidermal_30C' = '#00AACC',
+  'periderm' = '#9D983D',
+  'neural_crest?' = '#E15759',
+  'primitive_gut' = '#AA8780',
+  'otic_vesicle' = '#33FF00',
+  'blood_vasculature' = '#FFD320',
+  'blood' = '#FF420E',
+  'hatching_gland_30C' = '#E377C2',
+  'hatching_gland_23C' = '#F7B6D2',
+  'immune_cell' = '#14FFB1'
+)
+
+DimPlot(so_parse, label = T, repel = T, pt.size = 1, cols = colors) + NoLegend()
+
+
+p <- FeaturePlot(so_parse, rui_genes$Gene)
+
+SaveFigure(p, "rui_genes_feature", width = 20, height = 20)
+
+
+VlnPlot(so_parse, c("ezh1"), group.by = "annotation")
+
+translate("CBX8", from = "Human", to = "N. furzeri (NCBI)")
+```
+

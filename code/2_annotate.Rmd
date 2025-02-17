@@ -146,6 +146,8 @@ cluster_ids <- c(
 names(cluster_ids) <- levels(so)
 so_annotated <- RenameIdents(so, cluster_ids)
 
+so_annotated$annotation <- Idents(so_annotated)
+
 
 p <- DimPlot(so_annotated, label = T, repel = T, pt.size = 1) + NoLegend()
 SaveFigure(p, name = "umap_annotated", height = 10, width = 10)
@@ -198,4 +200,7 @@ so_annotated <- ReadObject("so_annotated")
 
 ```
 
+```{r}
+FeaturePlot(so_parse, c("hnf1a", "hnf1b"))
+```
 
